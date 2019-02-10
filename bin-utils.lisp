@@ -1,111 +1,79 @@
-;;;;Wrote some utilities while working on an increibly boring Digital Systems assignment so that I don't neck myself part way through. Here's the result.
+;;;;Wrote some utilities while working on an incredibly boring Digital Systems assignment so that I don't neck myself part way through. Here's the results.
+;;;;I intend to use them myself for emulation projects down the road. Given that there are probably a few efficieny issues, those will be ironed out as I require better solutions.
+;;;;I also expect a few bugs to crop up. What can I say, I'm new to this.
+
+;;To-Do:
+;;    Export list
+;;    Floating point operations
+
+(defpackage :bin-utils
+  (:use :cl))
+(in-package :bin-utils)
 
 ;;Standard range utility
 (defun range (f stop &optional (b 1))
   (loop for i from f to stop by b
      collect i))
-(expt 
 
-(defun base (int base)
-  (let* ((numerals (write-to-string int))
-         (pow (length numerals)))
-    (loop for i across numerals
-         ;collect i)))
-       do (decf pow)
-         collect (* (parse-integer (string i)) (expt base pow)))))
 
-;;Easily extended to higher bases
-(defun bin (int)
-  (labels ((bin-acc (current acc)
+;;Function that most of this library revolves around. Given any
+;;integer input, it will return a BCD list represention of that
+;;input.
+;;Pass it to (MAPPER INT BASE) for a string result with
+;;proper formating
+(defun base (int &optional (base 2))
+  "Return a BCD list for a given INT in particular BASE"
+  (labels ((acker (current acc)
              (if (zerop current)
                  acc
-                 (bin-acc (floor current 2) (push (rem current 2) acc)))))
-    (bin-acc int '())))
+                 (acker (floor current base) (push (rem current base) acc)))))
+    (acker int '())))
 
-(defun hex->bin (hex-int)
-  ;;Get DEC value of hex numeral, convert to binary)
+;;Return the string representation of a BCD list given by
+;;the function (BASE INT BASE).
+;;Only works up to base-16, but can easily be extended
+(defun mapper (base-list)
+  "Return a properly formatted string given a BCD representation"
+  (let ((vals '(#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9 #\A #\B #\C #\D #\E #\F)))
+    (labels ((stringify (current acc)
+               (if current
+                   (stringify (cdr current) (concatenate 'string (string (nth (car current) vals)) acc))
+                   (reverse acc))))
+      (stringify base-list ""))))
 
+;;Utility function combining MAPPER and BASE.
+;;Use this for most higher base conversions
+(defun pretty-base (int &optional (base 2))
+  "Return a higher base STRING given a decimal INT"
+  (mapper (base int base)))
 
-(defun hex (n)
-  ;;Sorry for this hackjob. It prevents divisions by 0.
-  (if (zerop (mod n 16)) ;and not equal to zero
-      (cons 16 (loop for i from 0 to (log (// n 16) 16) collect 0))
-		   ;;(reduce #'(lambda (x y) (format nil "~a ~a" x y))
-		;;		     (loop for i from 0 to (log (// n 16) 16)
-		;;			collect (write-to-string 0))))
+;;Essentially the reverse operation provided by BASE
+;;Spit out an integer given a string
+(defun reverse-base (base-rep &optional (base 2))
+  "Return the INT given a representation returned by BASE"
+  (let ((pow (length base-rep)))
+    (labels ((base-reccer (current acc)
+               (decf pow)
+               (if (null (cdr current))
+                   (+ acc (* (expt base pow)) (car current))
+                   (base-reccer (cdr current) (+ acc (* (expt base pow) (car current)))))))
+      (base-reccer base-rep (1+ pow)))))
 
-
-  ;;The important stuff starts here
-  (let* ((power (multiple-value-bind (val check) ;All this bullshit
-		    (ceiling (log n 16))         ;is just to handle
-		  (if (zerop check)              ;the overflow that
-		      (setf val (1+ val)))       ;will occur at any
-		  (expt 16 (1- val))))           ;powers of sixteen
-	 (find (// n power)))                    ;that we will find
-    (if (eq 1 power)
-	(cons find nil)
-	
-	;;If the next one is two powers less,
-	;;then we better account for that with more 0s
-	(let ((next-power (// power 16))
-	      (next-mod (mod n power)))
-	  (if (< next-mod next-power)
-	      (append (list find 0) (hex (mod n power)))
-	      (cons find (hex (mod n power)))))))))
-
-(defun int->hex (n)
-  (reduce #'(lambda (x y) (format nil "~a~a" x y))
-	  (mapcar #'hexmap (hex n))))
-  
-
-
-(defun hexify (file)
-  (let ((fh (open file :element-type '(unsigned-byte 8))))
-    (loop for byte = (read-byte fh nil nil)
-       until (eq byte nil)
-       collect byte)))
-
-(defun hexmap (n)
-  (case n
-    (0 "0")
-    (1 "1")
-    (2 "2")
-    (3 "3")
-    (4 "4")
-    (5 "5")
-    (6 "6")
-    (7 "7")
-    (8 "8")
-    (9 "9")
-    (10 "b")
-    (11 "b")
-    (12 "c")
-    (13 "d")
-    (14 "e")
-    (15 "f")))
-
-(defun // (x &rest y)
-  (multiple-value-bind (first rest)
-      (floor (/ x (reduce #'* y)))
-    first))
-
-(defun finder (num base)
-  ;;Find the binary numeral.
-  (labels ((find-rec (current)
-	                (let ((remainder (rem current base))
-		              (divisor (// current base)))
-			  (if (zerop current)
-			      0
-			      (cons remainder (find-rec divisor))))))
-    (mapcar #'hexmap (reverse (nconc (find-rec num) nil)))))
+(defun reverse-mapper (input &optional (base 2))
+  "Given some input string, return the INT value"
+  (let ((vals (mapcar #'(lambda (x y) ; Create an ASSOC list for 
+                          (cons x y)) ; quick lookup.
+                      '(#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9 #\A #\B #\C #\D #\E #\F)
+                      (range 0 16))))
+    (reverse-base (loop for char across input
+                     collect (cdr (assoc char vals)))
+                  base)))
 
 
-(defun rec (lst)
-  (if (null (cdr lst))
-      (car lst)
-      (concatenate 'string (car lst) (rec (cdr lst)))))
-
-(defun hex (input)
-  (if (zerop input)
-      "0"
-      (rec (finder input 16))))
+(defun reverse-base (base-rep &optional (base 2))
+  (let ((pow (length base-rep)))       ; Sum a list which
+    (reduce #'+                        ; is the evaluated
+            (mapcar #'(lambda (x)      ; BCD representation
+                        (decf pow)
+                        (* (expt base pow) x))
+                    base-rep))))
