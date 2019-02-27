@@ -1,3 +1,4 @@
+(ql:quickload :cl-utilities)
 (defpackage :emulator
   (:use :cl
         :bin-utils))
@@ -18,6 +19,56 @@
        if (equal substr (subseq string i (+ i len)))
          return t)))
 
+
+(defclass 8080-conditions ()
+    ((z :type int
+        :initform 1
+        :accessor z)
+     (s :type int
+        :initform 1
+        :accessor s)
+     (p :type int
+        :initform 1
+        :accessor p)
+     (cy :type int
+         :initform 1
+         :accessor cy)
+     (ac :type int
+         :initform 1
+         :accessor ac)
+     (pad :type int
+          :initform 3
+          :accessor pad)))
+
+
+(defclass 8080-state ()
+           ((a :type int
+               :accessor a)
+            (b :type int
+               :accessor b)
+            (c :type int
+               :accessor c)
+            (d :type int
+               :accessor d)
+            (e :type int
+               :accessor e)
+            (h :type int
+               :accessor h)
+            (l :type int
+               :accessor l)
+            (sp :type int
+               :accessor sp)
+            (pc :type int
+               :accessor pc)
+            (memory :type int
+               :accessor memory)
+            (cc :type 8080-conditions
+                :accessor cc)
+            (int-enable :type int
+                        :accessor int-enable)))
+  
+
+(defvar *state* (make-instance 
 
 ;; First  we need to put this into a hash table (serializable?).
 ;; There will be too many lookups for such an easy optimization.
@@ -284,8 +335,34 @@
 
 (defun opcode-lookup (byte)
   (declare (integer byte))
-  (let ((data (pretty-base byte 16)))
-    (assoc data 8080-grammar :test 'equalp)))
+  (let* ((data (pretty-base byte 16))
+         (opcode (assoc data 8080-grammar :test 'equalp)))
+    opcode))
+    ;(cl-utilities:split-sequence #\Space (nth 1 opcode))))
+
+(defun opcode-operate (opcode-list)
+  "Change the STATE of our emulator given a list of information provided by OPCODE-LOOKUP"
+  (declare (list opcode-list))
+  (let ((inc (nth 2 opcode-list))
+        (opcode-info (cl-utilities:split-sequence #\Space (nth 1 opcode-list))))
+    (list inc opcode-info)))
+
+;; ALL THE POSSIBLE WAYS TO IMPLEMENT A SHELL:
+;; 1) hash/assoc table lookup
+;;        - Return lambdas which call another function
+;;        - Return forms which may be evaluated by a macro (added
+;;          benefit of being able to parse these forms for information
+;;          regarding PARAMETERS)
+;;        - COND lookup (absolute pain in the ass)
+;;        - Switch macro
+;;        - Personalized macro to deal with this
+;;
+;; ALL THE POSSIBLE FORMS OF MEMONICS
+;; 1) MEM
+;; 2) MEM reg
+;; 3) MEM reg int
+;; 4) MEM addr
+;; 5) -            This might signify data
 
 (defvar 8080-shell
   (make-hash-table :test 'equal))
@@ -300,15 +377,117 @@
 ;;to be evaluated.
 ;;This way we could actually examine the parameters (which will
 ;;be one of the difficulties with this way of doing things)
-(defun update-shell ()
+(defun update-shell-with-functions ()
   (mapcar #'(lambda (x) (append-shell (car x) (cdr x)))
-          '(("NOP" . #'(lambda () (NOP)))
-            ("LXI" . #'(lambda (register d16) (LXI register d16)))
+          '(("NOP" . #'(lambda () nil))
+            ("LXI" . #'(lambda ()
             ("STAX" . #'(lambda (register) (STAX register)))
             ("INX" . #'(lambda (register) (INX register)))
             ("INR" . #'(lambda (register) (INR register)))
             ("DCR" . #'(lambda (register) (DCR register)))
-            ("MVI" . #'(lambda (register d8) (MVI register d8))))))
+            ("MVI" . #'(lambda (register d8) (MVI register d8))))))))
+
+;;So uhhh...
+;;This is a thing I guess.
+;;At first I thought it was ridiculous (actually it probably still ;;is), but I eventually got to the point where I had to see how well
+;;it would work.
+;;Or if it would work at all for that matter >_>
+;;Honestly I should probably just do this with classes like a sane
+;;person might (credit at github.com/samanthadoran/potential-disco
+;;for a great example as to how that might work)
+(defun update-shell-with-forms ()
+    (mapcar #'(lambda (x) (append-shell (car x) (cdr x)))
+     '(("NOP" . `(NOP))
+       ("LXI" . `(LXI ,reg1 ,int))
+       ("STAX" . `(STAX ,reg1))
+       ("INX" . `(INX ,reg1))
+       ("INR" . `(INR ,reg1))
+       ("DCR" . `(DCR ,reg1))
+       ("MVI" . `(MVI ,reg1 ,int))
+       ("RLC" . `(RLC))
+       ("DAD" . `(DAD ,reg1))
+       ("LDAX" . `(LDAX ,reg1))
+       ("DCX" . `(DCX ,reg1))
+       ("RRC" . `(RRC))
+       ("RAL" . `(RAL))
+       ("RAR" . `(RAR))
+       ("SHLD" . `(SHLD ,adr))
+       ("DAA" . `(DAA))
+       ("LHLD" . `(LDLD ,adr))
+       ("CMA" . `(CMA))
+       ("STC" . `(STC))
+       ("CMC" . `(CMC))
+       ("LDA" . `(LDA ,adr))
+       ("MOV" . `(MOV ,reg1 ,reg2))
+       ("HLT" . `(HLT))
+       ("ADD" . `(ADD ,reg1))
+       ("ADC" . `(ADC ,reg1))
+       ("SUB" . `(SUB ,reg1))
+       ("SBB" . `(SBB ,reg1))
+       ("ANA" . `(ANA ,reg1))
+       ("XRA" . `(XRA ,reg1))
+       ("ORA" . `(ORA ,reg1))
+       ("CMP" . `(CMP ,reg1))
+       ("RNZ" . `(RNZ))
+       ("POP" . `(POP ,reg1))
+       ("JNZ" . `(JNZ ,adr))
+       ("JMP" . `(JMP ,adr))
+       ("CNZ" . `(CNZ ,adr))
+       ("PUSH" . `(PUSH ,reg))
+       ("ADI" . `(ADI ,int))
+       ("RST" . `(RST ,int))
+       ("RZ" . `(RZ))
+       ("RET" . `(RET))
+       ("JZ" . `(JZ ,adr))
+       ("CZ" . `(CZ ,adr))
+       ("CALL" . `(CALL ,adr))
+       ("RNC" . `(RNC))
+       ("JNC" . `(JNC ,adr))
+       ("OUT" . `(OUT ,int))
+       ("CNC" . `(CNC ,adr))
+       ("SUI" . `(SUI ,adr))
+       ("RC" . `(RC))
+       ("JC" . `(JC ,adr))
+       ("IN" . `(IN ,int))
+       ("CC" . `(CC ,adr))
+       ("SBI" . `(SBI ,int))
+       ("RPO" . `(RPO))
+       ("JPO" . `(JPO ,adr))
+       ("XTHL" . `(XTHL))
+       ("CPO" . `(CPO ,adr))
+       ("ANI" . `(ANI ,int))
+       ("RPE" . `(RPE))
+       ("PCHL" . `(PCHL))
+       ("JPE" . `(JPE ,adr))
+       ("XCHG" . `(XCHG))
+       ("CPE" . `(CPE ,adr))
+       ("XRI" . `(XRI ,adr))
+       ("RP" . `(RP))
+       ("JP" . `(JP ,adr))
+       ("DI" . `(DI))
+       ("CP" . `(CP ,adr))
+       ("ORI" . `(ORI ,int))
+       ("RM" . `(RM))
+       ("SPHL" . `(SPHL))
+       ("JM" . `(JM ,adr))
+       ("EI" . `(EI))
+       ("CM" . `(CM ,adr))
+       ("CPI" . `(CPI ,int)))))
+;;75 distinct functions in total.
+       
+       
+
+       
+(defun inx (reg)
+  (format t "INX called with register value: ~a~%" reg))
+
+(defun inr (reg)
+  
+(defmacro op-eval (opcode)
+  `(let ((reg "REEE"))
+    ,(gethash opcode 8080-shell)))
+
+
 
 ;;UNCLEAN
 ;;UNCLEAN UNCLEAN UNCLEAN
